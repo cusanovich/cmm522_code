@@ -1,0 +1,4 @@
+Gene1	200	100	300	coding
+Gene2	100	200	400	noncoding
+Gene3	0	700	10	coding
+Gene4	1000	2000	1500	coding
