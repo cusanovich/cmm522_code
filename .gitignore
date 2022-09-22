@@ -1,3 +1,6 @@
 *.dat
 *.pdf
 results/
+pyart/
+.ipynb_checkpoints/
+*pycache*
