@@ -4,3 +4,4 @@ results/
 pyart/
 .ipynb_checkpoints/
 *pycache*
+preflight_*.log
