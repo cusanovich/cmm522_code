@@ -70,6 +70,12 @@ right now." If HPC promotes 3.14 to default, that passage becomes false. No
 error will fire. The text just quietly stops being true, and the lesson lands
 backwards. The pre-flight check tests this specifically.
 
+It is more fragile than it looks. Lmod notes that these defaults come from
+"Find First Rules" rather than being pinned by an administrator, and on this
+tree that resolves lexically — which is why `3.11` outranks `3.14`. Adding a
+`python/3.10` module would therefore make *it* the default, with no deliberate
+decision by anyone.
+
 **The R version is hardcoded in four documents.** When 4.5.2 disappears from
 the module list, InClass7, InClass8, HW7 and HW8 all need the same edit. Worth
 doing as one find-and-replace rather than discovering it mid-session.

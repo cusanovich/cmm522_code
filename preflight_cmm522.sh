@@ -7,6 +7,11 @@
 #     interactive -a cusanovichlab -n 4 -t 02:00:00
 #     bash preflight_cmm522.sh 2>&1 | tee preflight_$(date +%Y).log
 #
+# Budget 10-30 minutes. Most of that is the R package step: tidyverse pulls in
+# roughly ninety dependencies, and if the site has no binary repository
+# configured they are all built from source. The script prints each package as
+# it starts, so you can tell progress from a hang.
+#
 # Modules are not available on login nodes, so the module checks will report
 # nothing useful if you run this on wentletrap.
 #
@@ -61,8 +66,17 @@ fi
 # --- python ---------------------------------------------------------------
 note "Python modules  (InClass2 Steps 10-12 depend on these)"
 PY_RAW=$(module avail python 2>&1)
-echo "$PY_RAW" | grep -oE 'python/[0-9.]+/[0-9.]+ *(\(D\))?' | sed 's/^/        /' | sort -u
-PY_DEFAULT=$(echo "$PY_RAW" | grep -oE 'python/[0-9.]+/[0-9.]+ *\(D\)' | grep -oE '[0-9]+\.[0-9]+' | head -1)
+echo "$PY_RAW" | grep -oE 'python/[0-9.]+/[0-9.]+ *(\([^)]*\))?' | sed 's/^/        /' | sort -u
+# Ask Lmod directly rather than parsing markers: the flag on a default module
+# is (D), but it is (L,D) when the module also happens to be loaded, and
+# marker formats vary between Lmod versions.
+PY_DEFAULT=$(module --default avail python 2>&1 \
+             | grep -oE 'python/[0-9]+\.[0-9]+/' | grep -oE '[0-9]+\.[0-9]+' | head -1)
+if [ -z "$PY_DEFAULT" ]; then
+  # Fall back to the marker, accepting (D), (L,D) and (D,L).
+  PY_DEFAULT=$(echo "$PY_RAW" | grep -oE 'python/[0-9.]+/[0-9.]+ *\([^)]*D[^)]*\)' \
+               | grep -oE '[0-9]+\.[0-9]+' | head -1)
+fi
 if [ -z "$PY_DEFAULT" ]; then
   warn "could not determine the default python -- check 'module avail python' by hand"
 else
@@ -81,34 +95,55 @@ note "R package installs  (temporary library, removed afterwards)"
 TMPLIB=$(mktemp -d)
 module load "r/${EXPECT_R}" 2>/dev/null || module load "R/${EXPECT_R}" 2>/dev/null || true
 
-Rscript --vanilla - "$TMPLIB" <<'RS'
+# NOTE: deliberately NOT --vanilla. --vanilla implies --no-site-file, which
+# skips Rprofile.site -- and that is where a site-configured binary package
+# repository lives. Skipping it forces every package to build from source,
+# which is both far slower and not what a student actually experiences.
+Rscript - "$TMPLIB" <<'RS'
 args <- commandArgs(trailingOnly = TRUE)
 lib  <- args[1]
 .libPaths(c(lib, .libPaths()))
-options(repos = c(CRAN = "https://cloud.r-project.org"), Ncpus = 4)
+options(Ncpus = 4)
+
+# Only set a repository if the site has not already configured one.
+r <- getOption("repos")
+if (is.null(r[["CRAN"]]) || is.na(r[["CRAN"]]) || r[["CRAN"]] == "@CRAN@") {
+  r[["CRAN"]] <- "https://cloud.r-project.org"
+  options(repos = r)
+}
 
 cat("        R", as.character(getRversion()), "\n")
+cat("        repo:", getOption("repos")[["CRAN"]], "\n")
+if (grepl("packagemanager|__linux__", getOption("repos")[["CRAN"]])) {
+  cat("        (binary repository -- installs should be quick)\n")
+} else {
+  cat("        (source repository -- tidyverse will take a while)\n")
+}
 
 cran <- c("swirl", "tidyverse", "remotes", "rlang", "vctrs", "glue")
 bad <- character(0)
 for (p in cran) {
+  cat("        installing ", p, " ... ", sep = ""); flush.console()
+  t0 <- Sys.time()
   ok <- tryCatch({
     suppressMessages(install.packages(p, lib = lib, quiet = TRUE))
     requireNamespace(p, lib.loc = lib, quietly = TRUE)
   }, error = function(e) FALSE)
-  cat(if (ok) "  ok    " else "  FAIL  ", p, "\n", sep = "")
+  secs <- round(as.numeric(difftime(Sys.time(), t0, units = "secs")))
+  cat(if (ok) "ok" else "FAILED", " (", secs, "s)\n", sep = "")
   if (!ok) bad <- c(bad, p)
 }
 
 # generativeart comes from GitHub (InClass8). The shared cluster IP hits
 # GitHub's unauthenticated rate limit easily, so a failure here may be the
 # limit rather than the package.
+cat("        installing generativeart (GitHub) ... "); flush.console()
 ok <- tryCatch({
   remotes::install_github("cutterkom/generativeart", lib = lib,
                           upgrade = "never", quiet = TRUE)
   requireNamespace("generativeart", lib.loc = lib, quietly = TRUE)
-}, error = function(e) { cat("        ", conditionMessage(e), "\n"); FALSE })
-cat(if (ok) "  ok    " else "  FAIL  ", "generativeart (GitHub)\n", sep = "")
+}, error = function(e) { cat("\n        ", conditionMessage(e), "\n"); FALSE })
+cat(if (ok) "ok\n" else "FAILED\n", sep = "")
 if (!ok) bad <- c(bad, "generativeart")
 
 if (length(bad)) {
